@@ -2,6 +2,7 @@ import requests
 import time
 import json
 import os
+import random
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,7 +11,44 @@ BOT_ID = os.getenv("BOT_ID")
 GROUP_ID = os.getenv("GROUP_ID")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 LAST_MESSAGE_ID = None
+MY_SENDER_ID = os.getenv("MY_SENDER_ID")
+TWINWORD_API_KEY = os.getenv("TWINWORD_API_KEY")
+TWINWORD_API_HOST = os.getenv("TWINWORD_API_HOST")
 
+def analyze_sentiment(text):
+    url = "https://twinword-twinword-bundle-v1.p.rapidapi.com/sentiment_analyze/"
+    headers = {
+        "X-RapidAPI-Key": TWINWORD_API_KEY,
+        "X-RapidAPI-Host": TWINWORD_API_HOST
+    }
+    params = {"text": text}
+    response = requests.get(url, headers=headers, params=params)
+    return response.json()
+
+def categorize_sentiment(score):
+    responses = {
+        "very very negative": ["That's not a nice thing to say.", "That's quite harsh."],
+        "very negative": ["That's a bit negative.", "Try to be a bit more positive."],
+        "negative": ["That's slightly negative.", "Could be more positive."],
+        "neutral": ["Why yes that makes sense", "I see your point."],
+        "positive": ["That's fairly positive.", "That's a good vibe!"],
+        "very positive": ["That's very positive!", "Great to hear!"],
+        "very very positive": ["That's excellent to hear!", "Such positivity!"],
+    }
+    if score <= -0.75:
+        return random.choice(responses["very very negative"])
+    elif -0.75 < score <= -0.5:
+        return random.choice(responses["very negative"])
+    elif -0.5 < score < 0.0:
+        return random.choice(responses["negative"])
+    elif 0.0 <= score <= 0.25:
+        return random.choice(responses["neutral"])
+    elif 0.25 < score <= 0.5:
+        return random.choice(responses["positive"])
+    elif 0.5 < score <= 0.75:
+        return random.choice(responses["very positive"])
+    else:  # score > 0.75
+        return random.choice(responses["very very positive"])
 
 def send_message(text, attachments=None):
     """Send a message to the group using the bot."""
@@ -38,19 +76,37 @@ def process_message(message):
     """Process and respond to a message."""
     global LAST_MESSAGE_ID
     text = message["text"].lower()
+    sender_id = message["sender_id"] #Get the senders ID
+    sender_name = message["name"] #Get the senders name
+    sender_type = message["sender_type"]
 
     # i.e. responding to a specific message (note that this checks if "hello bot" is anywhere in the message, not just the beginning)
-    if "hello bot" in text:
-        send_message("sup")
-
+    if sender_type == "bot":
+        pass #Do nothing
+    elif "good morning" in text:
+        send_message("Good morning, " + sender_name + "!")
+    elif "good night" in text:
+        send_message("Good night, " + sender_name + "!")
+    elif sender_id == MY_SENDER_ID:
+        sentiment_result = analyze_sentiment(text)
+        if sentiment_result and 'score' in sentiment_result:
+            sentiment_response = categorize_sentiment(sentiment_result['score'])
+            send_message(f"{sender_name}, {sentiment_response}")
     LAST_MESSAGE_ID = message["id"]
 
 
 def main():
     global LAST_MESSAGE_ID
-    # this is an infinite loop that will try to read (potentially) new messages every 10 seconds, but you can change this to run only once or whatever you want
+    # Fetch the latest messages to set the initial LAST_MESSAGE_ID
+    recent_messages = get_group_messages()
+    if recent_messages:
+        LAST_MESSAGE_ID = recent_messages[0]["id"]  # Set to the latest message ID
+
     while True:
         messages = get_group_messages(LAST_MESSAGE_ID)
+        if messages:
+            # Update LAST_MESSAGE_ID to the latest message in this batch
+            LAST_MESSAGE_ID = messages[0]["id"]
         for message in reversed(messages):
             process_message(message)
         time.sleep(10)
